@@ -19,7 +19,8 @@ export default function Graficos() {
   const [hiddenEmployees, setHiddenEmployees] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [chartData, setChartData] = useState<any>(null);
-  const [stats, setStats] = useState<
+  const [stats, setStats] = useState<any>(null);
+  const { toast } = useToast();
 
   // Carregar dados reais do Supabase
   useEffect(() => {
