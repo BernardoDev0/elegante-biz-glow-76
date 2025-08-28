@@ -1,0 +1,5 @@
+/* Dashboard styles - all styles defined in design system */
+.dashboard-container {
+  min-height: 100vh;
+  background: hsl(var(--background));
+}
