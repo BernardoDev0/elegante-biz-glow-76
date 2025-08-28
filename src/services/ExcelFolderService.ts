@@ -1,24 +1,27 @@
 import * as XLSX from 'xlsx';
 import { CalculationsService } from './CalculationsService';
 
-export interface ExcelEmployeeData {
+export interface ExcelRecord {
+  date: string;
+  refinery: string;
+  points: number;
+  observations: string;
+  month: string;
+  week: number;
+  employee: string;
+}
+
+export interface EmployeeExcelData {
   name: string;
   totalPoints: number;
   totalRecords: number;
-  monthlyData: { [month: string]: { points: number; records: number } };
-  weeklyData: { [week: string]: { points: number; records: number } };
-  records: Array<{
-    date: string;
-    refinery: string;
-    points: number;
-    observations: string;
-    month: string;
-    week: number;
-  }>;
+  records: ExcelRecord[];
+  monthlyData: Record<string, { points: number; records: number }>;
+  weeklyData: Record<string, { points: number; records: number }>;
 }
 
 export interface FolderProcessingResult {
-  employees: { [name: string]: ExcelEmployeeData };
+  employees: Record<string, EmployeeExcelData>;
   statistics: {
     totalFiles: number;
     totalEmployees: number;
@@ -26,20 +29,32 @@ export interface FolderProcessingResult {
     totalPoints: number;
     totalProfit: number;
   };
-  chartData: {
-    weeklyData: any[];
-    monthlyData: any[];
-    teamPerformance: any[];
-  };
+  lastProcessed: string;
 }
 
+/**
+ * Serviço principal para ler arquivos Excel da pasta "registros monitorar"
+ * Substitui completamente o Supabase para dados históricos
+ */
 export class ExcelFolderService {
   private static readonly POINT_VALUE = 3.25; // R$ 3,25 por ponto
-  
+  private static cachedData: FolderProcessingResult | null = null;
+  private static lastCacheTime: number = 0;
+  private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+
   /**
-   * Processa toda a pasta "registros monitorar" e subpastas
+   * Processa toda a pasta "registros monitorar" e suas subpastas
    */
-  static async processFolderStructure(): Promise<FolderProcessingResult> {
+  static async processRegistrosFolder(): Promise<FolderProcessingResult> {
+    // Verificar cache
+    const now = Date.now();
+    if (this.cachedData && (now - this.lastCacheTime) < this.CACHE_DURATION) {
+      console.log('📋 Usando dados em cache da pasta Excel');
+      return this.cachedData;
+    }
+
+    console.log('🔍 === PROCESSANDO PASTA "registros monitorar" ===');
+    
     const result: FolderProcessingResult = {
       employees: {},
       statistics: {
@@ -49,25 +64,36 @@ export class ExcelFolderService {
         totalPoints: 0,
         totalProfit: 0
       },
-      chartData: {
-        weeklyData: [],
-        monthlyData: [],
-        teamPerformance: []
-      }
+      lastProcessed: new Date().toISOString()
     };
 
     try {
-      // Simular estrutura da pasta (você pode adaptar para ler arquivos reais)
-      const folderStructure = await this.getFolderStructure();
-      
-      for (const folder of folderStructure) {
-        for (const file of folder.files) {
+      // Estrutura conhecida da pasta
+      const folderStructure = [
+        { folder: 'mes 4', files: ['Matheus Abril.xlsx', 'Maurício Abril.xlsx', 'Rodrigo Abril.xlsx'] },
+        { folder: 'mes 5', files: ['Matheus Maio.xlsx', 'Maurício Maio.xlsx', 'Wesley Maio.xlsx'] },
+        { folder: 'mes 6', files: ['Matheus Junho.xlsx', 'Maurício Junho.xlsx', 'Wesley Junho.xlsx'] },
+        { folder: 'mes 7', files: ['Matheus Julho.xlsx', 'Maurício Julho.xlsx', 'Wesley Julho.xlsx'] }
+      ];
+
+      // Processar cada pasta
+      for (const { folder, files } of folderStructure) {
+        console.log(`📁 Processando pasta: ${folder}`);
+        
+        for (const fileName of files) {
           try {
-            const employeeData = await this.processExcelFile(file);
-            this.mergeEmployeeData(result, employeeData);
-            result.statistics.totalFiles++;
+            const filePath = `registros monitorar/${folder}/${fileName}`;
+            console.log(`📄 Processando: ${fileName}`);
+            
+            if (await this.fileExists(filePath)) {
+              const employeeData = await this.processExcelFile(filePath, fileName);
+              this.mergeEmployeeData(result, employeeData);
+              result.statistics.totalFiles++;
+            } else {
+              console.warn(`⚠️ Arquivo não encontrado: ${filePath}`);
+            }
           } catch (error) {
-            console.error(`Erro ao processar ${file.name}:`, error);
+            console.error(`❌ Erro ao processar ${fileName}:`, error);
           }
         }
       }
@@ -75,89 +101,69 @@ export class ExcelFolderService {
       // Calcular estatísticas finais
       this.calculateFinalStatistics(result);
       
-      // Gerar dados dos gráficos
-      this.generateChartData(result);
-
+      // Atualizar cache
+      this.cachedData = result;
+      this.lastCacheTime = now;
+      
+      console.log('✅ Processamento concluído:', result.statistics);
       return result;
       
     } catch (error) {
-      console.error('Erro ao processar pasta:', error);
+      console.error('❌ Erro ao processar pasta:', error);
       throw error;
     }
   }
 
   /**
-   * Simula a estrutura da pasta (adapte para ler arquivos reais do sistema)
+   * Verifica se arquivo existe
    */
-  private static async getFolderStructure() {
-    // Esta função deve ser adaptada para ler a estrutura real da pasta
-    // Por enquanto, vou simular baseado nos arquivos que vejo no projeto
-    
-    const folders = [
-      {
-        name: 'mes 4',
-        files: [
-          { name: 'Matheus Abril.xlsx', path: 'registros monitorar/mes 4/Matheus Abril.xlsx' },
-          { name: 'Maurício Abril.xlsx', path: 'registros monitorar/mes 4/Maurício Abril.xlsx' },
-          { name: 'Rodrigo Abril.xlsx', path: 'registros monitorar/mes 4/Rodrigo Abril.xlsx' }
-        ]
-      },
-      {
-        name: 'mes 5',
-        files: [
-          { name: 'Matheus Maio.xlsx', path: 'registros monitorar/mes 5/Matheus Maio.xlsx' },
-          { name: 'Maurício Maio.xlsx', path: 'registros monitorar/mes 5/Maurício Maio.xlsx' },
-          { name: 'Wesley Maio.xlsx', path: 'registros monitorar/mes 5/Wesley Maio.xlsx' }
-        ]
-      },
-      {
-        name: 'mes 6',
-        files: [
-          { name: 'Matheus Junho.xlsx', path: 'registros monitorar/mes 6/Matheus Junho.xlsx' },
-          { name: 'Maurício Junho.xlsx', path: 'registros monitorar/mes 6/Maurício Junho.xlsx' },
-          { name: 'Wesley Junho.xlsx', path: 'registros monitorar/mes 6/Wesley Junho.xlsx' }
-        ]
-      },
-      {
-        name: 'mes 7',
-        files: [
-          { name: 'Matheus Julho.xlsx', path: 'registros monitorar/mes 7/Matheus Julho.xlsx' },
-          { name: 'Maurício Julho.xlsx', path: 'registros monitorar/mes 7/Maurício Julho.xlsx' },
-          { name: 'Wesley Julho.xlsx', path: 'registros monitorar/mes 7/Wesley Julho.xlsx' }
-        ]
-      }
-    ];
-
-    return folders;
+  private static async fileExists(filePath: string): Promise<boolean> {
+    try {
+      const response = await fetch(`/${filePath}`, { method: 'HEAD' });
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 
   /**
    * Processa um arquivo Excel individual
    */
-  private static async processExcelFile(file: { name: string; path: string }): Promise<ExcelEmployeeData> {
+  private static async processExcelFile(filePath: string, fileName: string): Promise<EmployeeExcelData> {
     try {
-      // Extrair nome do funcionário do arquivo
-      const employeeName = this.extractEmployeeNameFromFile(file.name);
+      // Extrair nome do funcionário
+      const employeeName = this.extractEmployeeName(fileName);
       
-      // Ler arquivo Excel (você precisa adaptar para ler do sistema de arquivos)
-      const workbook = await this.readExcelFile(file.path);
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      // Ler arquivo Excel
+      const response = await fetch(`/${filePath}`);
+      if (!response.ok) {
+        throw new Error(`Arquivo não encontrado: ${filePath}`);
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+      
+      // Pegar primeira planilha
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-      const employeeData: ExcelEmployeeData = {
+      console.log(`📊 ${jsonData.length} linhas encontradas em ${fileName}`);
+
+      const employeeData: EmployeeExcelData = {
         name: employeeName,
         totalPoints: 0,
         totalRecords: 0,
+        records: [],
         monthlyData: {},
-        weeklyData: {},
-        records: []
+        weeklyData: {}
       };
 
       // Processar cada linha do Excel
-      jsonData.forEach((row: any) => {
+      jsonData.forEach((row: any, index: number) => {
         try {
-          const record = this.parseExcelRow(row, employeeName);
-          if (record && record.points > 0) {
+          const record = this.parseExcelRow(row, employeeName, index);
+          if (record) {
             employeeData.records.push(record);
             employeeData.totalPoints += record.points;
             employeeData.totalRecords++;
@@ -178,124 +184,135 @@ export class ExcelFolderService {
             employeeData.weeklyData[weekKey].records++;
           }
         } catch (error) {
-          console.warn('Erro ao processar linha do Excel:', error);
+          console.warn(`⚠️ Erro na linha ${index + 1}:`, error);
         }
       });
 
+      console.log(`✅ ${employeeName}: ${employeeData.totalRecords} registros, ${employeeData.totalPoints} pontos`);
       return employeeData;
       
     } catch (error) {
-      console.error(`Erro ao processar arquivo ${file.name}:`, error);
+      console.error(`❌ Erro ao processar ${filePath}:`, error);
       throw error;
     }
-  }
-
-  /**
-   * Lê arquivo Excel do sistema de arquivos
-   */
-  private static async readExcelFile(filePath: string): Promise<XLSX.WorkBook> {
-    try {
-      // No ambiente WebContainer, você pode usar fetch para ler arquivos locais
-      const response = await fetch(`/${filePath}`);
-      if (!response.ok) {
-        throw new Error(`Arquivo não encontrado: ${filePath}`);
-      }
-      
-      const arrayBuffer = await response.arrayBuffer();
-      return XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
-      
-    } catch (error) {
-      console.error(`Erro ao ler arquivo ${filePath}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Extrai nome do funcionário do nome do arquivo
-   */
-  private static extractEmployeeNameFromFile(fileName: string): string {
-    // Remove extensão e mês
-    const nameWithoutExt = fileName.replace(/\.(xlsx|xls)$/i, '');
-    
-    // Extrair apenas o nome (antes do mês)
-    const parts = nameWithoutExt.split(' ');
-    return parts[0]; // Primeiro nome
   }
 
   /**
    * Converte linha do Excel para registro estruturado
    */
-  private static parseExcelRow(row: any, employeeName: string) {
+  private static parseExcelRow(row: any, employeeName: string, rowIndex: number): ExcelRecord | null {
     try {
-      // Tentar diferentes nomes de colunas
-      const dateValue = row.Data || row.data || row.DATE || row.Date;
-      const pointsValue = parseFloat(row.Pontos || row.pontos || row.PONTOS || row.Points || 0);
-      const refineryValue = String(row.Refinaria || row.refinaria || row.REFINARIA || row.Refinery || '').trim();
-      const observationsValue = String(row.Observações || row.observacoes || row.OBSERVACOES || row.Observations || '').trim();
+      // Buscar colunas com nomes alternativos (case insensitive)
+      const dateValue = this.findColumnValue(row, ['Data', 'data', 'DATE', 'Date']);
+      const pointsValue = this.findColumnValue(row, ['Pontos', 'pontos', 'PONTOS', 'Points']);
+      const refineryValue = this.findColumnValue(row, ['Refinaria', 'refinaria', 'REFINARIA', 'Refinery']);
+      const observationsValue = this.findColumnValue(row, ['Observações', 'observacoes', 'OBSERVACOES', 'Observations']);
 
-      if (!dateValue || pointsValue <= 0) {
+      // Validar dados essenciais
+      if (!dateValue) {
+        return null; // Linha sem data válida
+      }
+
+      const points = parseFloat(pointsValue) || 0;
+      if (points <= 0) {
+        return null; // Linha sem pontos válidos
+      }
+
+      // Converter data do Excel
+      const parsedDate = this.parseExcelDate(dateValue);
+      if (!parsedDate || isNaN(parsedDate.getTime())) {
+        console.warn(`Data inválida na linha ${rowIndex + 1}: ${dateValue}`);
         return null;
       }
 
-      const parsedDate = this.parseExcelDate(dateValue);
+      // Calcular mês e semana baseado na lógica 26→25
       const month = this.getMonthFromDate(parsedDate);
       const week = CalculationsService.getWeekFromDate(parsedDate.toISOString().split('T')[0]);
 
       return {
         date: parsedDate.toISOString(),
-        refinery: refineryValue,
-        points: pointsValue,
-        observations: observationsValue,
-        month,
-        week
+        refinery: String(refineryValue || '').trim(),
+        points: points,
+        observations: String(observationsValue || '').trim(),
+        month: month,
+        week: week,
+        employee: employeeName
       };
       
     } catch (error) {
-      console.warn('Erro ao converter linha do Excel:', error);
+      console.warn(`Erro ao processar linha ${rowIndex + 1}:`, error);
       return null;
     }
   }
 
   /**
-   * Converte valor de data do Excel para Date
+   * Busca valor de coluna com nomes alternativos
    */
-  private static parseExcelDate(dateValue: any): Date {
-    if (dateValue instanceof Date) {
-      return dateValue;
-    }
-    
-    if (typeof dateValue === 'string') {
-      // Tentar formatos brasileiros: DD/MM/YYYY
-      const parts = dateValue.split('/');
-      if (parts.length === 3) {
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]) - 1; // Month is 0-based
-        const year = parseInt(parts[2]);
-        return new Date(year, month, day);
-      }
-      
-      // Tentar parse direto
-      const parsed = new Date(dateValue);
-      if (!isNaN(parsed.getTime())) {
-        return parsed;
+  private static findColumnValue(row: any, possibleNames: string[]): any {
+    for (const name of possibleNames) {
+      if (row.hasOwnProperty(name) && row[name] !== undefined && row[name] !== null && row[name] !== '') {
+        return row[name];
       }
     }
-    
-    if (typeof dateValue === 'number') {
-      // Excel serial date
-      return new Date((dateValue - 25569) * 86400 * 1000);
-    }
-    
-    return new Date();
+    return null;
   }
 
   /**
-   * Determina mês baseado na lógica 26→25
+   * Converte valor de data do Excel para Date
+   */
+  private static parseExcelDate(dateValue: any): Date | null {
+    try {
+      if (dateValue instanceof Date) {
+        return dateValue;
+      }
+      
+      if (typeof dateValue === 'string') {
+        // Formato brasileiro: DD/MM/YYYY ou DD/MM/YY
+        if (dateValue.includes('/')) {
+          const parts = dateValue.split('/');
+          if (parts.length === 3) {
+            let day = parseInt(parts[0]);
+            let month = parseInt(parts[1]) - 1; // 0-based
+            let year = parseInt(parts[2]);
+            
+            // Ajustar ano de 2 dígitos
+            if (year < 100) {
+              year += year < 50 ? 2000 : 1900;
+            }
+            
+            if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+              return new Date(year, month, day);
+            }
+          }
+        }
+        
+        // Tentar outros formatos
+        const parsed = new Date(dateValue);
+        if (!isNaN(parsed.getTime())) {
+          return parsed;
+        }
+      }
+      
+      if (typeof dateValue === 'number') {
+        // Excel serial date (dias desde 1900-01-01)
+        const excelEpoch = new Date(1899, 11, 30); // 30 de dezembro de 1899
+        const date = new Date(excelEpoch.getTime() + dateValue * 24 * 60 * 60 * 1000);
+        return date;
+      }
+      
+      return null;
+      
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Determina mês baseado na lógica 26→25 da empresa
    */
   private static getMonthFromDate(date: Date): string {
     const day = date.getDate();
     const month = date.getMonth() + 1;
-    const year = date.getFullYear();
 
     const monthNames = [
       'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -303,14 +320,12 @@ export class ExcelFolderService {
     ];
 
     let targetMonth = month;
-    let targetYear = year;
 
-    // Lógica 26→25: se dia >= 26, pertence ao próximo mês
+    // Lógica 26→25: se dia >= 26, pertence ao próximo mês da empresa
     if (day >= 26) {
       targetMonth = month + 1;
       if (targetMonth > 12) {
         targetMonth = 1;
-        targetYear = year + 1;
       }
     }
 
@@ -318,16 +333,28 @@ export class ExcelFolderService {
   }
 
   /**
-   * Mescla dados de um funcionário no resultado geral
+   * Extrai nome do funcionário do nome do arquivo
    */
-  private static mergeEmployeeData(result: FolderProcessingResult, employeeData: ExcelEmployeeData) {
-    const employeeName = employeeData.name;
+  private static extractEmployeeName(fileName: string): string {
+    // Remove extensão
+    const nameWithoutExt = fileName.replace(/\.(xlsx|xls)$/i, '');
     
-    if (!result.employees[employeeName]) {
-      result.employees[employeeName] = employeeData;
+    // Extrair nome (antes do mês)
+    const parts = nameWithoutExt.split(' ');
+    return parts[0];
+  }
+
+  /**
+   * Mescla dados de funcionário no resultado
+   */
+  private static mergeEmployeeData(result: FolderProcessingResult, employeeData: EmployeeExcelData) {
+    const name = employeeData.name;
+    
+    if (!result.employees[name]) {
+      result.employees[name] = employeeData;
     } else {
-      // Mesclar dados existentes
-      const existing = result.employees[employeeName];
+      // Mesclar com dados existentes
+      const existing = result.employees[name];
       existing.totalPoints += employeeData.totalPoints;
       existing.totalRecords += employeeData.totalRecords;
       existing.records.push(...employeeData.records);
@@ -367,45 +394,186 @@ export class ExcelFolderService {
   }
 
   /**
-   * Gera dados para os gráficos
+   * Gera dados para gráficos baseados nos arquivos Excel
    */
-  private static generateChartData(result: FolderProcessingResult) {
-    const employees = Object.keys(result.employees);
-    
-    // Dados semanais
+  static async generateChartData(): Promise<{
+    weeklyData: any[];
+    monthlyData: any[];
+    teamPerformance: any[];
+  }> {
+    const folderData = await this.processRegistrosFolder();
+    const employees = Object.keys(folderData.employees);
+
+    console.log('📊 Gerando dados dos gráficos a partir dos arquivos Excel');
+
+    // Dados semanais (5 semanas do ciclo)
     const weeklyData = [];
     for (let week = 1; week <= 5; week++) {
       const weekData = { name: `Semana ${week}` };
       employees.forEach(employeeName => {
         const weekKey = `Semana ${week}`;
-        weekData[employeeName] = result.employees[employeeName].weeklyData[weekKey]?.points || 0;
+        weekData[employeeName] = folderData.employees[employeeName].weeklyData[weekKey]?.points || 0;
       });
       weeklyData.push(weekData);
     }
-    result.chartData.weeklyData = weeklyData;
 
     // Dados mensais
     const allMonths = new Set<string>();
-    Object.values(result.employees).forEach(employee => {
+    Object.values(folderData.employees).forEach(employee => {
       Object.keys(employee.monthlyData).forEach(month => allMonths.add(month));
     });
 
-    const monthlyData = Array.from(allMonths).sort().map(month => {
+    const sortedMonths = Array.from(allMonths).sort((a, b) => {
+      const monthOrder = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
+      return monthOrder.indexOf(a) - monthOrder.indexOf(b);
+    });
+
+    const monthlyData = sortedMonths.map(month => {
       const monthData = { name: month };
       employees.forEach(employeeName => {
-        monthData[employeeName] = result.employees[employeeName].monthlyData[month]?.points || 0;
+        monthData[employeeName] = folderData.employees[employeeName].monthlyData[month]?.points || 0;
       });
       return monthData;
     });
-    result.chartData.monthlyData = monthlyData;
 
-    // Performance da equipe (pizza)
+    // Performance da equipe (gráfico de pizza)
     const teamPerformance = employees.map(employeeName => ({
       name: employeeName,
-      value: result.employees[employeeName].totalPoints,
+      value: folderData.employees[employeeName].totalPoints,
       color: this.getEmployeeColor(employeeName)
     }));
-    result.chartData.teamPerformance = teamPerformance;
+
+    return {
+      weeklyData,
+      monthlyData,
+      teamPerformance
+    };
+  }
+
+  /**
+   * Calcula estatísticas gerais baseadas nos arquivos Excel
+   */
+  static async getGeneralStats() {
+    try {
+      const folderData = await this.processRegistrosFolder();
+      const employees = Object.values(folderData.employees);
+
+      let bestPerformer = '';
+      let bestPoints = 0;
+      let totalPointsForAverage = 0;
+      let employeeCountForAverage = 0;
+
+      employees.forEach(employee => {
+        // Melhor performer
+        if (employee.totalPoints > bestPoints) {
+          bestPoints = employee.totalPoints;
+          bestPerformer = employee.name;
+        }
+
+        // Média da equipe (excluindo Rodrigo se for freelancer)
+        if (employee.name !== 'Rodrigo') {
+          totalPointsForAverage += employee.totalPoints;
+          employeeCountForAverage++;
+        }
+      });
+
+      const avgTeam = employeeCountForAverage > 0 ? 
+        Math.round(totalPointsForAverage / employeeCountForAverage) : 0;
+      
+      const totalGoal = 29500; // Meta mensal da equipe
+      const progressPercentage = (folderData.statistics.totalPoints / totalGoal) * 100;
+
+      return {
+        bestPerformer,
+        bestPoints,
+        avgTeam,
+        totalGoal: Math.round(totalGoal / 1000 * 10) / 10, // 29.5K
+        progressPercentage: Math.round(progressPercentage * 10) / 10
+      };
+      
+    } catch (error) {
+      console.error('Erro ao calcular estatísticas dos arquivos Excel:', error);
+      return {
+        bestPerformer: '',
+        bestPoints: 0,
+        avgTeam: 0,
+        totalGoal: 29.5,
+        progressPercentage: 0
+      };
+    }
+  }
+
+  /**
+   * Busca dados de um funcionário específico
+   */
+  static async getEmployeeData(employeeName: string): Promise<EmployeeExcelData | null> {
+    try {
+      const folderData = await this.processRegistrosFolder();
+      return folderData.employees[employeeName] || null;
+    } catch (error) {
+      console.error(`Erro ao buscar dados de ${employeeName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Busca registros filtrados por funcionário e semana
+   */
+  static async getFilteredRecords(filters: {
+    employee?: string;
+    week?: string;
+    searchTerm?: string;
+  }): Promise<ExcelRecord[]> {
+    try {
+      const folderData = await this.processRegistrosFolder();
+      let allRecords: ExcelRecord[] = [];
+
+      // Coletar todos os registros
+      Object.values(folderData.employees).forEach(employee => {
+        allRecords.push(...employee.records);
+      });
+
+      // Aplicar filtros
+      let filteredRecords = allRecords;
+
+      if (filters.employee && filters.employee !== 'todos') {
+        filteredRecords = filteredRecords.filter(record => record.employee === filters.employee);
+      }
+
+      if (filters.week && filters.week !== 'todas') {
+        const weekNumber = parseInt(filters.week);
+        filteredRecords = filteredRecords.filter(record => record.week === weekNumber);
+      }
+
+      if (filters.searchTerm) {
+        const searchLower = filters.searchTerm.toLowerCase();
+        filteredRecords = filteredRecords.filter(record => 
+          record.refinery.toLowerCase().includes(searchLower) ||
+          record.observations.toLowerCase().includes(searchLower)
+        );
+      }
+
+      // Ordenar por data (mais recente primeiro)
+      filteredRecords.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      return filteredRecords;
+      
+    } catch (error) {
+      console.error('Erro ao buscar registros filtrados:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Limpa cache forçando reprocessamento
+   */
+  static clearCache() {
+    this.cachedData = null;
+    this.lastCacheTime = 0;
+    console.log('🗑️ Cache da pasta Excel limpo');
   }
 
   /**
@@ -419,64 +587,6 @@ export class ExcelFolderService {
       'Wesley': '#ef4444'
     };
     return colorMap[employeeName] || '#6b7280';
-  }
-
-  /**
-   * Busca dados de um funcionário específico
-   */
-  static async getEmployeeData(employeeName: string): Promise<ExcelEmployeeData | null> {
-    try {
-      const folderData = await this.processFolderStructure();
-      return folderData.employees[employeeName] || null;
-    } catch (error) {
-      console.error(`Erro ao buscar dados de ${employeeName}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Exporta dados processados para Excel
-   */
-  static async exportProcessedData(data: FolderProcessingResult): Promise<void> {
-    try {
-      const wb = XLSX.utils.book_new();
-
-      // Aba de resumo
-      const summaryData = [
-        ['Estatística', 'Valor'],
-        ['Total de Arquivos', data.statistics.totalFiles],
-        ['Total de Funcionários', data.statistics.totalEmployees],
-        ['Total de Registros', data.statistics.totalRecords],
-        ['Total de Pontos', data.statistics.totalPoints],
-        ['Lucro Total', `R$ ${data.statistics.totalProfit.toFixed(2)}`]
-      ];
-      
-      const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, summaryWs, 'Resumo');
-
-      // Aba por funcionário
-      Object.entries(data.employees).forEach(([name, employee]) => {
-        const employeeSheet = employee.records.map(record => ({
-          Data: new Date(record.date).toLocaleDateString('pt-BR'),
-          Refinaria: record.refinery,
-          Pontos: record.points,
-          Observações: record.observations,
-          Mês: record.month,
-          Semana: record.week
-        }));
-        
-        const ws = XLSX.utils.json_to_sheet(employeeSheet);
-        XLSX.utils.book_append_sheet(wb, ws, name);
-      });
-
-      // Salvar arquivo
-      const fileName = `dados_processados_${new Date().toISOString().split('T')[0]}.xlsx`;
-      XLSX.writeFile(wb, fileName);
-      
-    } catch (error) {
-      console.error('Erro ao exportar dados processados:', error);
-      throw error;
-    }
   }
 
   /**
