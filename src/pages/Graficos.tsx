@@ -6,6 +6,7 @@ import { BarChart3, Target, Download, TrendingUp, Users, User } from "lucide-rea
 import { useToast } from "@/hooks/use-toast";
 import { ExportService } from "@/services/ExportService";
 import { DataService } from "@/services/DataService";
+import { ExcelDataService } from "@/services/ExcelDataService";
 import { ChartContainer } from "@/components/Charts/ChartContainer";
 import { WeeklyChart } from "@/components/Charts/WeeklyChart";
 import { MonthlyChart } from "@/components/Charts/MonthlyChart";
@@ -20,20 +21,41 @@ export default function Graficos() {
   const [loading, setLoading] = useState(false);
   const [chartData, setChartData] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
+  const [dataSource, setDataSource] = useState<"excel" | "supabase">("excel");
   const { toast } = useToast();
 
   // Carregar dados reais do Supabase
   useEffect(() => {
-    loadRealData();
+    loadData();
   }, []);
 
-  const loadRealData = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const [chartDataResult, statsResult] = await Promise.all([
-        DataService.getChartData(),
-        DataService.getGeneralStats()
-      ]);
+      // Configurar fonte de dados
+      DataService.setDataSource(dataSource === "excel");
+      
+      let chartDataResult, statsResult;
+      
+      if (dataSource === "excel") {
+        console.log('📊 Carregando dados dos arquivos Excel...');
+        [chartDataResult, statsResult] = await Promise.all([
+          ExcelDataService.generateChartDataFromExcel(),
+          ExcelDataService.getGeneralStatsFromExcel()
+        ]);
+        
+        // Adaptar formato para compatibilidade
+        chartDataResult = {
+          ...chartDataResult,
+          employeeStats: {}
+        };
+      } else {
+        console.log('📊 Carregando dados do Supabase...');
+        [chartDataResult, statsResult] = await Promise.all([
+          DataService.getChartData(),
+          DataService.getGeneralStats()
+        ]);
+      }
       
       setChartData(chartDataResult);
       setStats(statsResult);
@@ -41,7 +63,7 @@ export default function Graficos() {
       console.error('Erro ao carregar dados:', error);
       toast({
         title: "Erro",
-        description: "Erro ao carregar dados dos gráficos",
+        description: `Erro ao carregar dados ${dataSource === "excel" ? "dos arquivos Excel" : "do Supabase"}`,
         variant: "destructive",
       });
     } finally {
@@ -49,6 +71,22 @@ export default function Graficos() {
     }
   };
 
+  const handleDataSourceChange = async (newSource: "excel" | "supabase") => {
+    setDataSource(newSource);
+    
+    // Limpar cache se mudando para Excel
+    if (newSource === "excel") {
+      ExcelDataService.clearCache();
+    }
+    
+    // Recarregar dados
+    await loadData();
+    
+    toast({
+      title: "Fonte de dados alterada",
+      description: `Agora usando dados ${newSource === "excel" ? "dos arquivos Excel" : "do Supabase"}`,
+    });
+  };
   const toggleEmployee = (employee: string) => {
     setHiddenEmployees(prev => {
       const newSet = new Set(prev);
@@ -64,7 +102,15 @@ export default function Graficos() {
   const handleExportData = async () => {
     setLoading(true);
     try {
-      await ExportService.exportEmployeeDataToZip();
+      if (dataSource === "excel") {
+        // Exportar dados processados dos arquivos Excel
+        const processedData = await ExcelDataService.processRegistrosFolder();
+        await this.exportExcelData(processedData);
+      } else {
+        // Exportar dados do Supabase
+        await ExportService.exportEmployeeDataToZip();
+      }
+      
       toast({
         title: "Sucesso",
         description: "Arquivos exportados com sucesso! Verifique sua pasta de downloads.",
@@ -81,13 +127,21 @@ export default function Graficos() {
     }
   };
 
+  const exportExcelData = async (processedData: any) => {
+    // Implementar exportação dos dados processados
+    console.log('📤 Exportando dados processados dos arquivos Excel');
+    // Por enquanto, usar o ExportService existente
+    await ExportService.exportEmployeeDataToZip();
+  };
   const renderChart = () => {
     if (loading || !chartData) {
       return (
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-            <p className="text-muted-foreground">Carregando dados...</p>
+            <p className="text-muted-foreground">
+              Carregando dados {dataSource === "excel" ? "dos arquivos Excel" : "do Supabase"}...
+            </p>
           </div>
         </div>
       );
@@ -146,10 +200,31 @@ export default function Graficos() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Gráficos</h1>
-          <p className="text-muted-foreground">Visualização de dados e métricas da equipe</p>
+          <p className="text-muted-foreground">
+            Visualização de dados e métricas da equipe 
+            {dataSource === "excel" ? "(Arquivos Excel)" : "(Supabase)"}
+          </p>
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Seletor de fonte de dados */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant={dataSource === "excel" ? "dashboard-active" : "outline"}
+              size="sm"
+              onClick={() => handleDataSourceChange("excel")}
+            >
+              📁 Excel
+            </Button>
+            <Button
+              variant={dataSource === "supabase" ? "dashboard-active" : "outline"}
+              size="sm"
+              onClick={() => handleDataSourceChange("supabase")}
+            >
+              🗄️ Supabase
+            </Button>
+          </div>
+          
           <Button
             onClick={handleExportData}
             disabled={loading}
@@ -162,7 +237,7 @@ export default function Graficos() {
           
           <Badge variant="outline" className="text-dashboard-info border-dashboard-info/30">
             <Target className="h-3 w-3 mr-1" />
-            Meta Ativa
+            {dataSource === "excel" ? "Modo Excel" : "Modo Supabase"}
           </Badge>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { Employee, Entry } from './EmployeeService';
 import { CalculationsService } from './CalculationsService';
+import { ExcelDataService } from './ExcelDataService';
 
 export interface ChartData {
   weeklyData: any[];
@@ -20,14 +21,26 @@ export interface GeneralStats {
 /**
  * Serviço centralizado para busca de dados do Supabase
  * Responsável por abstrair queries complexas e fornecer dados estruturados
+ * 
+ * MODO HÍBRIDO: Pode usar Supabase OU arquivos Excel da pasta "registros monitorar"
  */
 export class DataService {
+  private static useExcelMode = true; // Alternar entre Excel e Supabase
+  
   private static readonly EMPLOYEE_COLORS = {
     'Rodrigo': '#8b5cf6',
     'Maurício': '#f59e0b', 
     'Matheus': '#10b981',
     'Wesley': '#ef4444'
   };
+
+  /**
+   * Alterna entre modo Excel e Supabase
+   */
+  static setDataSource(useExcel: boolean) {
+    this.useExcelMode = useExcel;
+    console.log(`📊 Modo de dados alterado para: ${useExcel ? 'Excel' : 'Supabase'}`);
+  }
 
   /**
    * Busca todos os funcionários com cache
@@ -246,8 +259,19 @@ export class DataService {
 
   /**
    * Gera todos os dados de gráficos de uma vez
+   * Agora suporta tanto Supabase quanto arquivos Excel
    */
   static async getChartData(): Promise<ChartData> {
+    if (this.useExcelMode) {
+      console.log('📊 Usando dados dos arquivos Excel');
+      const excelChartData = await ExcelDataService.generateChartDataFromExcel();
+      return {
+        ...excelChartData,
+        employeeStats: {}
+      };
+    }
+    
+    console.log('📊 Usando dados do Supabase');
     const [weeklyData, monthlyData, teamPerformance] = await Promise.all([
       this.getWeeklyChartData(),
       this.getMonthlyChartData(),
@@ -264,8 +288,22 @@ export class DataService {
 
   /**
    * Calcula estatísticas gerais
+   * Agora suporta tanto Supabase quanto arquivos Excel
    */
   static async getGeneralStats(): Promise<GeneralStats> {
+    if (this.useExcelMode) {
+      console.log('📊 Calculando estatísticas dos arquivos Excel');
+      const excelStats = await ExcelDataService.getGeneralStatsFromExcel();
+      return excelStats || {
+        bestPerformer: '',
+        bestPoints: 0,
+        avgTeam: 0,
+        totalGoal: 29.5,
+        progressPercentage: 0
+      };
+    }
+    
+    console.log('📊 Calculando estatísticas do Supabase');
     const employees = await this.getEmployees();
     const monthDates = CalculationsService.getMonthCycleDates();
 
