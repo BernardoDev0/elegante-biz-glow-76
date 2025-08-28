@@ -3,13 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { MetricCard } from "@/components/Dashboard/MetricCard";
 import { EmployeeCard } from "@/components/Dashboard/EmployeeCard";
 import { ProgressSection } from "@/components/Dashboard/ProgressSection";
-import { ExcelFolderService } from "@/services/ExcelFolderService";
+import { EmployeeService, Employee } from "@/services/EmployeeService";
 import { CalculationsService } from "@/services/CalculationsService";
 
-interface EmployeeMetrics {
-  id: string;
-  name: string;
-  real_name: string;
+interface EmployeeMetrics extends Employee {
   weeklyPoints: number;
   weeklyGoal: number;
   monthlyPoints: number;
@@ -29,45 +26,37 @@ const Index = () => {
   const loadEmployeesData = async () => {
     try {
       setLoading(true);
-      
-      // Buscar dados dos arquivos Excel
-      const folderData = await ExcelFolderService.processRegistrosFolder();
-      const employeeNames = Object.keys(folderData.employees);
+      const allEmployees = await EmployeeService.getAllEmployees();
       
       // Calcular métricas para cada funcionário
-      const employeesWithMetrics: EmployeeMetrics[] = employeeNames.map((employeeName) => {
-        const employeeData = folderData.employees[employeeName];
-        
-        // Calcular pontos da semana selecionada
-        const weekKey = `Semana ${selectedWeek}`;
-        const weeklyPoints = employeeData.weeklyData[weekKey]?.points || 0;
-        
-        // Calcular pontos mensais (soma de todas as semanas)
-        const monthlyPoints = Object.values(employeeData.weeklyData)
-          .reduce((sum, week) => sum + week.points, 0);
-        
-        // Definir metas baseadas no funcionário
-        const weeklyGoal = employeeName === 'Matheus' ? 2675 : 2375;
-        const monthlyGoal = employeeName === 'Matheus' ? 10500 : 9500;
-        
-        const weeklyProgress = CalculationsService.calculateProgressPercentage(weeklyPoints, weeklyGoal);
-        const monthlyProgress = CalculationsService.calculateProgressPercentage(monthlyPoints, monthlyGoal);
-        
-        const status = weeklyProgress >= 90 ? "above" : weeklyProgress >= 70 ? "on-track" : "below";
-        
-        return {
-          id: employeeName,
-          name: employeeName,
-          real_name: employeeName,
-          weeklyPoints,
-          weeklyGoal,
-          monthlyPoints,
-          monthlyGoal,
-          weeklyProgress,
-          monthlyProgress,
-          status
-        };
-      });
+      const employeesWithMetrics = await Promise.all(
+        allEmployees.map(async (employee) => {
+          const weekDates = CalculationsService.getWeekDates(selectedWeek);
+          const monthDates = CalculationsService.getMonthCycleDates();
+          
+          const weeklyPoints = await EmployeeService.getWeekPoints(employee.id, weekDates);
+          const monthlyPoints = await EmployeeService.getMonthPoints(employee.id, monthDates);
+          
+          const weeklyGoal = CalculationsService.getWeeklyGoal(employee);
+          const monthlyGoal = CalculationsService.getMonthlyGoal(employee);
+          
+          const weeklyProgress = CalculationsService.calculateProgressPercentage(weeklyPoints, weeklyGoal);
+          const monthlyProgress = CalculationsService.calculateProgressPercentage(monthlyPoints, monthlyGoal);
+          
+          const status = weeklyProgress >= 90 ? "above" : weeklyProgress >= 70 ? "on-track" : "below";
+          
+          return {
+            ...employee,
+            weeklyPoints,
+            weeklyGoal,
+            monthlyPoints,
+            monthlyGoal,
+            weeklyProgress,
+            monthlyProgress,
+            status
+          } as EmployeeMetrics;
+        })
+      );
       
       setEmployees(employeesWithMetrics);
     } catch (error) {
@@ -77,8 +66,20 @@ const Index = () => {
     }
   };
 
-  // Carregar dados dos arquivos Excel
+  // Verificar se o usuário tem permissão (CEO)
   useEffect(() => {
+    const userData = localStorage.getItem("currentUser");
+    if (!userData) {
+      navigate("/login");
+      return;
+    }
+    
+    const user = JSON.parse(userData);
+    if (user.role !== "ceo") {
+      navigate("/dashboard");
+      return;
+    }
+    
     loadEmployeesData();
   }, [navigate, selectedWeek]);
 

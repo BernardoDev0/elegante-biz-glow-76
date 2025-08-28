@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { ExcelFolderService } from "@/services/ExcelFolderService";
+import { supabase } from "@/integrations/supabase/client";
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
@@ -45,7 +45,7 @@ export default function Registros() {
   const [employees, setEmployees] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Carregar dados dos arquivos Excel
+  // Carregar dados do Supabase
   useEffect(() => {
     loadRecords();
   }, []);
@@ -54,30 +54,44 @@ export default function Registros() {
     try {
       setLoading(true);
       
-      // Buscar registros dos arquivos Excel
-      const excelRecords = await ExcelFolderService.getFilteredRecords({
-        employee: selectedEmployee,
-        week: selectedWeek,
-        searchTerm: searchTerm
-      });
+      // Buscar registros primeiro
+      const { data: entries, error: entriesError } = await supabase
+        .from('entry')
+        .select('id, date, points, observations, refinery, employee_id')
+        .order('date', { ascending: false })
+        .limit(200);
+
+      if (entriesError) throw entriesError;
+
+      // Buscar funcionários
+      const { data: employees, error: employeesError } = await supabase
+        .from('employee')
+        .select('id, real_name');
+
+      if (employeesError) throw employeesError;
+
+      // Criar mapa de funcionários para lookup rápido
+      const employeeMap = employees?.reduce((map, emp) => {
+        map[emp.id] = emp.real_name;
+        return map;
+      }, {} as Record<number, string>) || {};
 
       // Transformar dados para o formato da interface
-      const transformedRecords: EntryRecord[] = excelRecords.map((record, index) => ({
-        id: index + 1, // ID sequencial
-        date: format(new Date(record.date), 'dd/MM/yyyy', { locale: ptBR }),
-        time: format(new Date(record.date), 'HH:mm', { locale: ptBR }),
-        employee: record.employee,
-        refinery: record.refinery,
-        points: record.points,
-        observations: record.observations,
-        status: record.points > 0 ? "completed" : "absent"
-      }));
+      const transformedRecords: EntryRecord[] = entries?.map(entry => ({
+        id: entry.id,
+        date: format(parseISO(entry.date), 'dd/MM/yyyy', { locale: ptBR }),
+        time: format(parseISO(entry.date), 'HH:mm', { locale: ptBR }),
+        employee: employeeMap[entry.employee_id] || 'Desconhecido',
+        refinery: entry.refinery,
+        points: entry.points,
+        observations: entry.observations,
+        status: entry.points > 0 ? "completed" : "absent"
+      })) || [];
 
       setRecords(transformedRecords);
 
       // Extrair funcionários únicos
-      const folderData = await ExcelFolderService.processRegistrosFolder();
-      const uniqueEmployees = Object.keys(folderData.employees);
+      const uniqueEmployees = [...new Set(transformedRecords.map(r => r.employee))];
       setEmployees(uniqueEmployees);
 
     } catch (error) {
@@ -92,11 +106,6 @@ export default function Registros() {
     }
   };
 
-  // Recarregar quando filtros mudarem
-  useEffect(() => {
-    loadRecords();
-  }, [selectedEmployee, selectedWeek, searchTerm]);
-
   const filteredRecords = records.filter(record => {
     const matchesSearch = record.employee.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          record.refinery.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -104,8 +113,16 @@ export default function Registros() {
     
     const matchesEmployee = selectedEmployee === "todos" || record.employee === selectedEmployee;
     
-    // Os filtros já foram aplicados no ExcelFolderService
-    const matchesWeek = true;
+    // Filtro por semana baseado no ciclo 26→25
+    let matchesWeek = true;
+    if (selectedWeek !== "todas") {
+      const weekNumber = parseInt(selectedWeek);
+      // Converter data de dd/MM/yyyy de volta para ISO para o cálculo
+      const [day, month, year] = record.date.split('/');
+      const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      const recordWeek = CalculationsService.getWeekFromDate(isoDate);
+      matchesWeek = recordWeek === weekNumber;
+    }
     
     return matchesSearch && matchesEmployee && matchesWeek;
   });
